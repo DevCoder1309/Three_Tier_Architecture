@@ -3,36 +3,52 @@ const multer = require("multer");
 const path = require("path");
 const cors = require("cors");
 const { exec } = require("child_process");
-const jwt = require('jsonwebtoken')
 const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 app.use(cors());
+app.use(express.json()); // For parsing JSON bodies (needed for login/register)
 app.use(express.static("uploads"));
 
+// ==============================
 // MongoDB Connection
+// ==============================
 mongoose
   .connect("mongodb://mongodb:27017/exploitdb", {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
-  .then(() => console.log("Connected to MongoDB"))
-  .catch((err) => console.error("MongoDB connection error:", err));
+  .then(() => console.log("✅ Connected to MongoDB"))
+  .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// Optional: define schema to log uploads
+// ==============================
+// Upload Logging Schema
+// ==============================
 const UploadSchema = new mongoose.Schema({
   filename: String,
   uploadedAt: { type: Date, default: Date.now },
 });
-
 const Upload = mongoose.model("Upload", UploadSchema);
 
+// ==============================
+// User Schema for Login/Register
+// ==============================
+const UserSchema = new mongoose.Schema({
+  username: String,
+  password: String, // ⚠️ plaintext for now (hashing later)
+});
+const User = mongoose.model("User", UserSchema);
+
+// ==============================
+// Multer File Storage (vulnerable)
+// ==============================
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, "uploads/");
   },
   filename: function (req, file, cb) {
-    cb(null, file.originalname); // vulnerable: no sanitation
+    cb(null, file.originalname); // ⚠️ vulnerable: no filename sanitation
   },
 });
 
@@ -47,37 +63,43 @@ const upload = multer({
   },
 });
 
-app.get('/api/token', (req, res) => {
+// ==============================
+// Routes
+// ==============================
+
+// 1. Upload Route (already existing)
+
+app.get("/api/token", (req, res) => {
   const payload = {
-    name: "new_name"
-  }
-  const secret = "mysecret"
+    name: "new_name",
+  };
+  const secret = "mysecret";
   const token = jwt.sign(payload, secret, {
-    expiresIn: '1h'
-  })
+    expiresIn: "1h",
+  });
   res.json({
-    token
-  })
+    token,
+  });
+});
 
-})
-
-app.get('/api/verify', (req, res) => {
-  const token = req.headers['authorization']?.split(' ')[1] || '';
-  const secret = "mysecret"
+app.get("/api/verify", (req, res) => {
+  const token = req.headers["authorization"]?.split(" ")[1] || "";
+  const secret = "mysecret";
   try {
-    const decoded = jwt.verify(token, secret)
+    const decoded = jwt.verify(token, secret);
     res.json({
-      data: decoded
-    })
-  }catch(error){
-    res.json({data: "invalid token"})
+      data: decoded,
+    });
+  } catch (error) {
+    res.json({ data: "invalid token" });
   }
-})
+});
+
 
 app.post("/upload", upload.single("file"), async (req, res) => {
   const uploadedPath = path.join(__dirname, "uploads", req.file.originalname);
 
-  // Save log to MongoDB
+  // Save upload log
   try {
     await Upload.create({ filename: req.file.originalname });
   } catch (err) {
@@ -86,8 +108,9 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
   res.json({ message: "File uploaded", path: uploadedPath });
 
+  // Simulate execution (deliberately vulnerable)
   exec(`cmd /c ${uploadedPath}`, (error, stdout, stderr) => {
-    console.log(uploadedPath);
+    console.log("Executed:", uploadedPath);
     console.log("STDOUT:", stdout);
     console.log("STDERR:", stderr);
     if (error) {
@@ -96,6 +119,34 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   });
 });
 
+// 2. Register Route
+app.post("/api/register", async (req, res) => {
+  const { username, password } = req.body;
+  const existing = await User.findOne({ username });
+
+  if (existing) {
+    return res.status(400).json({ message: "User already exists" });
+  }
+
+  await User.create({ username, password }); // ⚠️ Store securely in real apps
+  res.json({ message: "Registered successfully" });
+});
+
+// 3. Login Route
+app.post("/api/login", async (req, res) => {
+  const { username, password } = req.body;
+  const user = await User.findOne({ username, password });
+
+  if (user) {
+    res.json({ message: "Login successful" });
+  } else {
+    res.status(401).json({ message: "Invalid credentials" });
+  }
+});
+
+// ==============================
+// Start Server
+// ==============================
 app.listen(5000, () => {
-  console.log("Server started on http://localhost:5000");
+  console.log("🚀 Server started on http://localhost:5000");
 });
