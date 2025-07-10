@@ -3,6 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const cors = require("cors");
 const { exec } = require("child_process");
+const jwt = require('jsonwebtoken')
 const mongoose = require("mongoose");
 
 const app = express();
@@ -45,6 +46,33 @@ const upload = multer({
     }
   },
 });
+
+app.get('/api/token', (req, res) => {
+  const payload = {
+    name: "new_name"
+  }
+  const secret = "mysecret"
+  const token = jwt.sign(payload, secret, {
+    expiresIn: '1h'
+  })
+  res.json({
+    token
+  })
+
+})
+
+app.get('/api/verify', (req, res) => {
+  const token = req.headers['authorization']?.split(' ')[1] || '';
+  const secret = "mysecret"
+  try {
+    const decoded = jwt.verify(token, secret)
+    res.json({
+      data: decoded
+    })
+  }catch(error){
+    res.json({data: "invalid token"})
+  }
+})
 
 app.post("/upload", upload.single("file"), async (req, res) => {
   const uploadedPath = path.join(__dirname, "uploads", req.file.originalname);
